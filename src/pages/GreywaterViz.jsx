@@ -1002,8 +1002,9 @@ function Sparkline({ data, color, w = 88, h = 20 }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────
 export default function GreywaterViz() {
-  const canvasRef  = useRef(null);
-  const stateRef   = useRef({});
+  const canvasRef    = useRef(null);
+  const containerRef = useRef(null); // mobile: imperative canvas container
+  const stateRef     = useRef({});
 
   // ── Responsive: detect mobile ───────────────────────────────
   const [isMobile, setIsMobile] = useState(false);
@@ -1071,31 +1072,61 @@ export default function GreywaterViz() {
     };
   });
 
-  // Mount scene — wait until canvas has real pixel dimensions before init
+  // Mount Three.js scene
   useEffect(() => {
-    const canvas = canvasRef.current;
     const mobile = window.innerWidth < 768;
-    let cleanupScene = null;
-    let started = false;
+    let canvas, cleanupScene;
 
-    function tryStart() {
-      if (started) return;
-      const w = canvas.offsetWidth || canvas.parentElement?.offsetWidth || 0;
-      const h = canvas.offsetHeight || canvas.parentElement?.offsetHeight || 0;
-      if (w < 10 || h < 10) return; // still zero — wait
-      started = true;
-      ro.disconnect();
-      cleanupScene = buildScene(canvas, () => stateRef.current, mobile);
+    if (mobile) {
+      // On mobile: create canvas imperatively with explicit pixel dimensions
+      // This avoids the CSS 100%→0px problem entirely
+      const container = containerRef.current;
+      if (!container) return;
+      const W = window.innerWidth;
+      const H = window.innerHeight - 52 - 68; // viewport minus topbar and bottom nav
+      canvas = document.createElement('canvas');
+      canvas.width  = W;
+      canvas.height = H;
+      canvas.style.width  = W + 'px';
+      canvas.style.height = H + 'px';
+      canvas.style.display = 'block';
+      canvas.style.touchAction = 'none';
+      canvas.style.userSelect = 'none';
+      container.appendChild(canvas);
+      cleanupScene = buildScene(canvas, () => stateRef.current, true);
+    } else {
+      // Desktop: React-managed canvas, use ResizeObserver
+      canvas = canvasRef.current;
+      let started = false;
+      const ro = new ResizeObserver(() => {
+        if (started) return;
+        const w = canvas.offsetWidth || canvas.parentElement?.offsetWidth || 0;
+        const h = canvas.offsetHeight || canvas.parentElement?.offsetHeight || 0;
+        if (w < 10 || h < 10) return;
+        started = true;
+        ro.disconnect();
+        cleanupScene = buildScene(canvas, () => stateRef.current, false);
+      });
+      ro.observe(canvas.parentElement || canvas);
+      // try immediately
+      const w0 = canvas.offsetWidth || canvas.parentElement?.offsetWidth || 0;
+      const h0 = canvas.offsetHeight || canvas.parentElement?.offsetHeight || 0;
+      if (w0 > 10 && h0 > 10) {
+        started = true;
+        ro.disconnect();
+        cleanupScene = buildScene(canvas, () => stateRef.current, false);
+      }
+      return () => {
+        ro.disconnect();
+        if (cleanupScene) cleanupScene();
+        cycleTimers.current.forEach(id => clearTimeout(id));
+        cycleTimers.current = [];
+      };
     }
 
-    // ResizeObserver fires as soon as the element gets a real size
-    const ro = new ResizeObserver(tryStart);
-    ro.observe(canvas.parentElement || canvas);
-    tryStart(); // also try immediately in case size is already known
-
     return () => {
-      ro.disconnect();
       if (cleanupScene) cleanupScene();
+      if (mobile && canvas && canvas.parentElement) canvas.parentElement.removeChild(canvas);
       cycleTimers.current.forEach(id => clearTimeout(id));
       cycleTimers.current = [];
     };
@@ -1315,7 +1346,8 @@ export default function GreywaterViz() {
         <div style={S.bodyMobile}>
           {/* Canvas fills screen above sheet */}
           <div style={{ ...S.canvasWrapMobile, height: sheetOpen ? "45%" : "calc(100% - 52px)" }}>
-            <canvas ref={canvasRef} style={S.canvas} />
+            {/* Canvas injected imperatively via containerRef to guarantee pixel dimensions */}
+            <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
             {/* Minimal phase dot on mobile */}
             <div style={{ position: "absolute", top: 8, left: 8, display: "flex", flexDirection: "column", gap: 3, pointerEvents: "none" }}>
