@@ -173,15 +173,12 @@ const oilFS = `
 const _tmpColor = new THREE.Color();
 
 // ─── SCENE BUILDER ────────────────────────────────────────────
-function buildScene(canvas, getState, isMob = false) {
-  // Derive real pixel dimensions — never trust canvas.clientWidth/Height on mobile
-  // as CSS 100% may not have resolved. Use the parent or window as ground truth.
-  const W = canvas.parentElement?.clientWidth  || canvas.clientWidth  || window.innerWidth;
-  const H = canvas.parentElement?.clientHeight || canvas.clientHeight ||
-            (window.innerHeight - (isMob ? 120 : 0));
+function buildScene(canvas, getState, isMob = false, forcedW = 0, forcedH = 0) {
+  // Use forced dimensions if provided (mobile imperative path), otherwise read from DOM
+  const W = forcedW || canvas.parentElement?.clientWidth  || canvas.clientWidth  || window.innerWidth;
+  const H = forcedH || canvas.parentElement?.clientHeight || canvas.clientHeight || (window.innerHeight - 120);
 
-  // Force canvas DOM attributes to real pixels BEFORE creating renderer
-  // This is what actually allocates the WebGL framebuffer at the right size
+  // Always set canvas pixel dimensions explicitly
   canvas.width  = Math.round(W * (isMob ? 1 : Math.min(window.devicePixelRatio, 2)));
   canvas.height = Math.round(H * (isMob ? 1 : Math.min(window.devicePixelRatio, 2)));
 
@@ -952,8 +949,13 @@ function buildScene(canvas, getState, isMob = false) {
   requestAnimationFrame(ts => { lastTime = ts; animate(ts); });
 
   function onResize() {
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+    const rw = isMob ? window.innerWidth  : (canvas.parentElement?.clientWidth  || canvas.clientWidth  || window.innerWidth);
+    const rh = isMob ? (window.innerHeight - 120) : (canvas.parentElement?.clientHeight || canvas.clientHeight || window.innerHeight);
+    if (!rw || !rh) return;
+    canvas.width  = Math.round(rw * (isMob ? 1 : Math.min(window.devicePixelRatio, 2)));
+    canvas.height = Math.round(rh * (isMob ? 1 : Math.min(window.devicePixelRatio, 2)));
+    renderer.setSize(rw, rh, false);
+    camera.aspect = rw / rh;
     camera.updateProjectionMatrix();
   }
   window.addEventListener("resize", onResize);
@@ -1093,7 +1095,7 @@ export default function GreywaterViz() {
       canvas.style.touchAction = 'none';
       canvas.style.userSelect = 'none';
       container.appendChild(canvas);
-      cleanupScene = buildScene(canvas, () => stateRef.current, true);
+      cleanupScene = buildScene(canvas, () => stateRef.current, true, W, H);
     } else {
       // Desktop: React-managed canvas, use ResizeObserver
       canvas = canvasRef.current;
